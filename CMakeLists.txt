@@ -6,6 +6,9 @@ endif()
 
 message(STATUS "CMake version: ${CMAKE_VERSION}")
 
+set(CMAKE_C_COMPILER /usr/bin/gcc-4.4)
+set(CMAKE_CXX_COMPILER /usr/bin/g++-4.4)
+
 include(${CMAKE_SOURCE_DIR}/cmake/macros.cmake)
 enable_testing()
 

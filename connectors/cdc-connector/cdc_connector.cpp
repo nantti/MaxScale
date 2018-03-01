@@ -32,7 +32,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
-
+#include <errno.h>
 
 #define CDC_CONNECTOR_VERSION "1.0.0"
 

@@ -5,14 +5,14 @@
  * This software is released under the MIT License.
  */
 
+// Using features that exist in the latest gcc-4 series, 4.4.7.
+
 #include <maxscale/cppdefs.hh>
 #include <maxscale/filter.hh>
-#include "stmsession.hh"
+#include "stmsession.h"
 
-namespace maxscale
+namespace stm_counter
 {
-
-
 class StmCounter : public maxscale::Filter<StmCounter, StmSession>
 {
 public:
@@ -34,4 +34,4 @@ private:
 
 private:
 };
-}
+} // stm_counter

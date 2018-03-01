@@ -89,7 +89,7 @@ int open_unix_socket(enum mxs_socket_type type, struct sockaddr_un *addr,
 
 int setnonblocking(int fd);
 int setblocking(int fd);
-char  *gw_strend(register const char *s);
+char  *gw_strend(const char *s);
 static char gw_randomchar();
 int gw_generate_random_str(char *output, int len);
 int gw_hex2bin(uint8_t *out, const char *in, unsigned int len);
@@ -184,7 +184,7 @@ static inline uint8_t* mxs_set_byte4(uint8_t* ptr, uint32_t value)
 static inline uint32_t mxs_get_byte4(const uint8_t* ptr)
 {
     return ((uint32_t) ptr[0]) | ((uint32_t) ptr[1] << 8) |
-        ((uint32_t) ptr[2] << 16) | ((uint32_t) ptr[3] << 24);
+           ((uint32_t) ptr[2] << 16) | ((uint32_t) ptr[3] << 24);
 }
 
 MXS_END_DECLS

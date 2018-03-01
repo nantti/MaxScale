@@ -5,7 +5,7 @@
  */
 
 #define MXS_MODULE_NAME "stmcounter"
-#include "stmcounter.hh"
+#include "stmcounter.h"
 #include <string>
 #include <maxscale/utils.h>
 
@@ -20,7 +20,7 @@ extern "C" MXS_MODULE* MXS_CREATE_MODULE()
         "Keeps statistics over sql statements.",
         "V1.0.0",
         RCAP_TYPE_CONTIGUOUS_INPUT,
-        &maxscale::StmCounter::s_object,
+        &stm_counter::StmCounter::s_object,
         NULL, /* Process init. */
         NULL, /* Process finish. */
         NULL, /* Thread init. */
@@ -35,7 +35,7 @@ extern "C" MXS_MODULE* MXS_CREATE_MODULE()
     return &info;
 }
 
-namespace maxscale
+namespace stm_counter
 {
 
 StmCounter::StmCounter()
@@ -72,4 +72,4 @@ uint64_t StmCounter::getCapabilities()
 {
     return RCAP_TYPE_NONE;
 }
-}
+} // stm_counter

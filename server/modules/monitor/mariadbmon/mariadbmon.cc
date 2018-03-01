@@ -212,8 +212,8 @@ public:
     bool operator == (const Gtid& rhs) const
     {
         return domain == rhs.domain &&
-            server_id != SERVER_ID_UNKNOWN && server_id == rhs.server_id &&
-            sequence == rhs.sequence;
+               server_id != SERVER_ID_UNKNOWN && server_id == rhs.server_id &&
+               sequence == rhs.sequence;
     }
     string to_string() const
     {
@@ -464,11 +464,11 @@ bool failover_check(MYSQL_MONITOR* mon, json_t** error_out)
         {
             if (uses_gtid(mon, mon_server, error_out))
             {
-                 slaves++;
+                slaves++;
             }
             else
             {
-                 error = true;
+                error = true;
             }
         }
     }
@@ -494,7 +494,8 @@ bool failover_check(MYSQL_MONITOR* mon, json_t** error_out)
  *
  * @return True, if switchover was performed, false otherwise.
  */
-bool mysql_switchover(MXS_MONITOR* mon, MXS_MONITORED_SERVER* new_master, MXS_MONITORED_SERVER* current_master, json_t** error_out)
+bool mysql_switchover(MXS_MONITOR* mon, MXS_MONITORED_SERVER* new_master,
+                      MXS_MONITORED_SERVER* current_master, json_t** error_out)
 {
     bool stopped = stop_monitor(mon);
     if (stopped)
@@ -519,7 +520,7 @@ bool mysql_switchover(MXS_MONITOR* mon, MXS_MONITORED_SERVER* new_master, MXS_MO
         {
             if (!uses_gtid(handle, mon_serv, error_out))
             {
-                 gtid_ok = false;
+                gtid_ok = false;
             }
         }
     }
@@ -592,7 +593,7 @@ bool mysql_handle_switchover(const MODULECMD_ARG* args, json_t** error_out)
         if (mon_curr_master == NULL)
         {
             PRINT_MXS_JSON_ERROR(error_out, NO_SERVER, current_master->unique_name, mon->name);
-             error = true;
+            error = true;
         }
     }
     else
@@ -622,7 +623,7 @@ bool mysql_handle_switchover(const MODULECMD_ARG* args, json_t** error_out)
     }
     else
     {
-        const char MSG[] = "Switchover attempted but not performed, as MaxScale is in passive mode.";
+        const char* const MSG = "Switchover attempted but not performed, as MaxScale is in passive mode.";
         PRINT_MXS_JSON_ERROR(error_out, MSG);
     }
 
@@ -1319,7 +1320,7 @@ static json_t* diagnostics_json(const MXS_MONITOR *mon)
             json_object_set_new(srv, "gtid_binlog_pos",
                                 json_string(serv_info->gtid_binlog_pos.to_string().c_str()));
             json_object_set_new(srv, "gtid_io_pos",
-                                    json_string(serv_info->slave_status.gtid_io_pos.to_string().c_str()));
+                                json_string(serv_info->slave_status.gtid_io_pos.to_string().c_str()));
             if (handle->multimaster)
             {
                 json_object_set_new(srv, "master_group", json_integer(serv_info->group));
@@ -2275,7 +2276,7 @@ monitorMain(void *arg)
             if (handle->master_gtid_domain >= 0 && domain != handle->master_gtid_domain)
             {
                 MXS_NOTICE("Gtid domain id of master has changed: %" PRId64 " -> %" PRId64 ".",
-                         handle->master_gtid_domain, domain);
+                           handle->master_gtid_domain, domain);
             }
             handle->master_gtid_domain = domain;
 
@@ -3522,7 +3523,7 @@ MXS_MONITORED_SERVER* select_new_master(MYSQL_MONITOR* mon, ServerVector* slaves
      * If multiple slaves have same number of events, select the one with most processed events. */
     MXS_MONITORED_SERVER* current_best = NULL;
     MySqlServerInfo* current_best_info = NULL;
-     // Servers that cannot be selected because of exclusion, but seem otherwise ok.
+    // Servers that cannot be selected because of exclusion, but seem otherwise ok.
     ServerVector valid_but_excluded;
     // Index of the current best candidate in slaves_out
     int master_vector_index = -1;
@@ -3541,7 +3542,7 @@ MXS_MONITORED_SERVER* select_new_master(MYSQL_MONITOR* mon, ServerVector* slaves
             {
                 valid_but_excluded.push_back(cand);
                 const char CANNOT_SELECT[] = "Promotion candidate '%s' is excluded from new "
-                "master selection.";
+                                             "master selection.";
                 MXS_INFO(CANNOT_SELECT, cand->server->unique_name);
             }
             else if (check_replication_settings(cand, cand_info))
@@ -3576,7 +3577,7 @@ MXS_MONITORED_SERVER* select_new_master(MYSQL_MONITOR* mon, ServerVector* slaves
         if (current_best == NULL)
         {
             const char EXCLUDED_ONLY_CAND[] = "Server '%s' is a viable choice for new master, "
-            "but cannot be selected as it's excluded.";
+                                              "but cannot be selected as it's excluded.";
             MXS_WARNING(EXCLUDED_ONLY_CAND, excluded_name);
             break;
         }
@@ -3585,8 +3586,8 @@ MXS_MONITORED_SERVER* select_new_master(MYSQL_MONITOR* mon, ServerVector* slaves
             // Print a warning if this server is actually a better candidate than the previous
             // best.
             const char EXCLUDED_CAND[] = "Server '%s' is superior to current "
-            "best candidate '%s', but cannot be selected as it's excluded. This may lead to "
-            "loss of data if '%s' is ahead of other servers.";
+                                         "best candidate '%s', but cannot be selected as it's excluded. This may lead to "
+                                         "loss of data if '%s' is ahead of other servers.";
             MXS_WARNING(EXCLUDED_CAND, excluded_name, current_best->server->unique_name, excluded_name);
             break;
         }
@@ -3817,7 +3818,7 @@ void print_redirect_errors(MXS_MONITORED_SERVER* first_server, const ServerVecto
 {
     // Individual server errors have already been printed to the log.
     // For JSON, gather the errors again.
-    const char MSG[] = "Could not redirect any slaves to the new master.";
+    const char* const MSG = "Could not redirect any slaves to the new master.";
     MXS_ERROR(MSG);
     if (err_out)
     {

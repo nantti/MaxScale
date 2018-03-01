@@ -9,7 +9,7 @@
 #include <maxscale/filter.hh>
 
 
-namespace maxscale
+namespace stm_counter
 {
 
 class StmCounter;
@@ -30,4 +30,4 @@ private:
 private:
     const StmCounter& m_filter;
 };
-}
+} // stm_counter

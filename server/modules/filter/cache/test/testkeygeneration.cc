@@ -48,7 +48,7 @@ int test(StorageFactory& factory, istream& in)
 
     if (Tester::get_statements(in, 0, &statements))
     {
-        typedef unordered_map<CACHE_KEY, string> Keys;
+        typedef std::tr1::unordered_map<CACHE_KEY, string> Keys;
         Keys keys;
 
         size_t n_keys = 0;

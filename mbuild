@@ -1,0 +1,65 @@
+#!/bin/bash
+
+function cleanup {
+    echo -e $Color_off
+}
+
+trap cleanup INT TERM EXIT
+
+# Don't get this wrong.
+if [[ -z $MAX_BUILD_DIR ]]; then
+    echo "please export MAX_BUILD_DIR."
+    echo "Make sure to get it right since there is an rm -rf $MAX_BUILD_DIR/*"
+   exit 1
+fi
+
+echo MAX_BUILD_DIR = $MAX_BUILD_DIR
+
+# ask_run. args: "question" "command" "retry"
+# asks the "question" and runs "command" , tries repatedly if "repeat"=^[^yY]
+# If "question" matches ^[^yY] runs the command immediately.
+function ask_run {
+    local answer=$1
+    if [[ $answer =~ ^[^yY] ]]; then
+	echo -e $IYellow
+	read -t 10 -n 1  -p "$1 (y) "  answer
+	echo -e $Color_off
+	if [[ -z $answer ]]; then
+	    answer=y
+	fi
+    fi
+    if [[ $answer =~ ^[yY] ]]; then
+	while true; do
+	    echo "$2"
+	    eval $2
+	    if [[ $? != 0 ]]; then
+	    	echo -e $Red
+	    	read -t 10 -n 1 -p "Something went wrong! Re-run (yn)? " answer
+	    	echo -e $Color_off
+	    	if [[ -z $answer || $answer =~ ^[yY] ]]; then
+	    	    continue
+	    	else
+		    exit 1
+		fi
+	    fi
+	    break
+	done
+	return 0 # command done	
+    else
+	return 1  # command not done
+    fi
+}
+
+chown_cmd="sudo chown -R nantti:nantti $MAX_BUILD_DIR"
+
+# fix deps. 'sudo make install' builds something
+ask_run y "$chown_cmd"
+ask_run "Clean directory and run cmake?" "rm -rf $MAX_BUILD_DIR/*"
+if [[ $? == 1 ]]; then
+    cmake_question="Run cmake?"
+else
+    cmake_question=y
+fi
+ask_run  "$cmake_question" "cmake ../MaxScale -DCMAKE_INSTALL_PREFIX=/opt -DBUILD_MAXCTRL=N -DBUILD_TESTS=Y"
+ask_run y "make -j16"
+ask_run "Install?" "sudo make install && sudo ./postinst"

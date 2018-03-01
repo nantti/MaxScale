@@ -6,7 +6,7 @@
 
 #define MXS_MODULE_NAME "stmcounter"
 
-#include "stmsession.hh"
+#include "stmsession.h"
 #include <maxscale/modutil.h>
 #include <string>
 
@@ -24,7 +24,7 @@ std::string to_sql(GWBUF *buffer)
 }
 } // anonymous
 
-namespace maxscale
+namespace stm_counter
 {
 StmSession::StmSession(MXS_SESSION* pSession, const StmCounter* pFilter)
     : maxscale::FilterSession(pSession)
@@ -60,4 +60,4 @@ int StmSession::routeQuery(GWBUF *buffer)
 
     return mxs::FilterSession::routeQuery(buffer);
 }
-}
+} // stm_counter

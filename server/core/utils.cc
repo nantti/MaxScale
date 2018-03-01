@@ -146,7 +146,7 @@ int setblocking(int fd)
     return 0;
 }
 
-char *gw_strend(register const char *s)
+char *gw_strend(const char *s)
 {
     while (*s++)
     {
@@ -196,7 +196,7 @@ int gw_hex2bin(uint8_t *out, const char *in, unsigned int len)
 
     while (in < in_end)
     {
-        register unsigned char b1 = char_val(*in);
+        unsigned char b1 = char_val(*in);
         uint8_t b2 = 0;
         in++;
         b2 =  (b1 << 4) | char_val(*in);
