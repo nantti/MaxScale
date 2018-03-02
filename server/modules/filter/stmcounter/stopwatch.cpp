@@ -84,10 +84,8 @@ std::pair<double, std::string> dur_to_human_readable(Duration dur)
 std::ostream& operator<<(std::ostream& os, Duration dur)
 {
     auto p = dur_to_human_readable(dur);
-    std::ostringstream oss; // the stream 'os' can have any kind of settings,
-    oss << std::fixed << std::setprecision(4) << p.first << ' ' << p.second;
+    os << p.first << ' ' << p.second;
 
-    os << oss.str();  // so only write a string to it
     return os;
 }
 }

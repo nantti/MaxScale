@@ -56,6 +56,11 @@ StmSession* StmCounter::newSession(MXS_SESSION* pSession)
     return StmSession::create(pSession, this);
 }
 
+void StmCounter::closeSession(MXS_FILTER *, MXS_FILTER_SESSION *pData)
+{
+
+}
+
 // static
 void StmCounter::diagnostics(DCB* pDcb)
 {

@@ -20,6 +20,7 @@ public:
     static StmCounter* create(const char* zName, char** pzOptions, MXS_CONFIG_PARAMETER* pParams);
 
     StmSession* newSession(MXS_SESSION* pSession);
+    void closeSession(MXS_FILTER*, MXS_FILTER_SESSION* pData);
 
     void diagnostics(DCB* pDcb);
     json_t* diagnostics_json() const;
@@ -32,6 +33,6 @@ private:
     StmCounter(const StmCounter&);
     StmCounter& operator = (const StmCounter&);
 
-private:
+    //std::map<StmSession
 };
 } // stm_counter

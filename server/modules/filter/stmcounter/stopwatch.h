@@ -14,14 +14,18 @@
 
 namespace base
 {
+// gcc 4.4 does not have a steady_clock
 typedef std::chrono::system_clock Clock;
 
 struct Duration : public Clock::duration // for ADL
 {
+    // gcc 4.4 does not inherit constructors, so this is a bit limited.
     Duration() = default;
     Duration(long long l) : Clock::duration(l) {}
     Duration(Clock::duration d) : Clock::duration(d) {}
 };
+
+typedef std::chrono::time_point<Clock, Duration> TimePoint;
 
 class StopWatch
 {
@@ -33,7 +37,6 @@ public:
     // Get elapsed time, reset StopWatch.
     Duration restart();
 private:
-    typedef std::chrono::time_point<Clock, Duration> TimePoint;
     TimePoint _start;
 };
 
