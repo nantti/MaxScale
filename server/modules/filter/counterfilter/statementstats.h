@@ -13,6 +13,53 @@
 #include <iosfwd>
 #include <chrono>
 #include <vector>
+#include <cstring>
+
+#include <iostream> // FIXME, remove
+
+#include <iostream>
+#include <vector>
+#include <cstring>
+
+namespace base
+{
+template <int N>
+struct QuickString
+{
+    QuickString(const char* ch)
+    {
+        std::strncpy(_buf, ch, N);
+        _buf[N - 1] = 0;
+    }
+    QuickString(const QuickString& other)
+    {
+        std::memcpy(_buf, other._buf, N);
+    }
+
+    operator const char*() const { return _buf;}
+    const char* c_str() const { return _buf;}
+
+    char _buf[N];
+};
+template<int N>
+bool operator==(const QuickString<N>& lhs, const QuickString<N>& rhs)
+{
+    return std::strcmp(lhs.c_str(), rhs.c_str()) == 0;
+}
+
+template<int N>
+bool operator<(const QuickString<N>& lhs, const QuickString<N>& rhs)
+{
+    return strcmp(lhs.c_str(), rhs.c_str()) < 0;
+}
+
+template <int N>
+std::ostream& operator<<(std::ostream& os, const QuickString<N>& ss)
+{
+    os << ss._buf;
+    return os;
+}
+} // base
 
 // Filter that keeps statistics of sql statements. Using a moving window-of-time
 // so that the stats, when requested, are as of "now". The purpose is to report
@@ -37,8 +84,12 @@ namespace stm_counter
 // Session ID same as maxscale_sid
 typedef uint64_t SessionId;
 
-// Statement Id, {std::string statement, bool isSubQuery}.
-typedef std::pair<std::string, bool> StatementId;
+
+typedef base::QuickString<32> StatementString;
+//typedef std::string StatementString;
+
+// Statement Id, {string statement, bool isSubQuery}.
+typedef std::pair<StatementString, bool> StatementId;
 
 // Statistics of a SQL statement. Not thread safe. Copies made, needs C++11.
 class StatementStats
@@ -90,6 +141,7 @@ public:
     const std::vector<StatementStats>& statementStats() const;
 
     void increment(const StatementId& statementId);
+    void purge(); // do a normal purge, for testing.
 private:
     SessionId _sessId;
     std::string _user;

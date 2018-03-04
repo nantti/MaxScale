@@ -6,13 +6,24 @@
 
 namespace stm_counter
 {
-
-const bool TimestampsOptimized = true;
+// Measured inserting a mixed set of 10M entires to 10 sessions
+// on an AMD FX(tm)-8350 in a single thread. Measured from top level,
+// so includes a little more than just inserting and purging.
+// Optimized  Non-optimized  Operation
+// 1.06s       1.14s         Insert 10M in a thight loop. Not much difference.
+// 15us        22ms          Single purge. Optimized > 1400x faster than non-optimized.
+// Memory usage difference is of course huge. For this example, the optimized version
+// uses numSessions*numStatementTypes*numSeconds = 10*4*2 = 80 entries, while the
+// non-optimized version uses 10,000,000 entries.
+// The gcc 4.4 does not use the small string optimization, so I tested with a little
+// QuckString class instead 30% faster.
+const bool TimestampsOptimized = false;
 
 // NOTE on this method. The statement-stats is simply a vector of timestamps where the
 // size() of the vector is the count. The _purge() function purges out-of-window timestamps.
-// The vector could grow large in very high volume. The "optimized" version uses a one second
-// granularity, effectively grouping all events that happen in one second into a single entry.
+// The vector grows large in very volume and long time windows. The "optimized" version uses
+// a one second granularity, effectively grouping all events that happen in one second
+// into a single entry.
 StatementStats::StatementStats(const StatementId& statementId, base::Duration timeWindow) :
     _statementId(statementId), _timeWindow(timeWindow)
 {
@@ -61,7 +72,7 @@ struct TimePointLessEqual
 
 void StatementStats::_purge() const
 {
-    //base::StopWatch sw;
+    base::StopWatch sw;
     auto windowBegin = base::Clock::now() - _timeWindow;
 
     // code duplication, alomst. Templetizing Timestamp would not make this clearer.
@@ -112,16 +123,6 @@ const int CleanupCountdown = 12;
 SessionStats::SessionStats(const SessionId& sessId, const std::string &user, base::Duration timeWindow) :
     _sessId(sessId), _user(user), _timeWindow(timeWindow), _cleanupCountdown(CleanupCountdown)
 {
-}
-
-void SessionStats::streamHumanReadable(std::ostream& os) const
-{
-    _purge();
-    os << "Session: " << _sessId << ' ' << _user << ". Window: " << _timeWindow << '\n';
-    for (auto ite = _statementStats.begin(); ite != _statementStats.end(); ++ite)
-    {
-        os << *ite << '\n';
-    }
 }
 
 void SessionStats::streamJson(std::ostream& os) const
@@ -180,8 +181,11 @@ void SessionStats::increment(const StatementId& statementId)
     {
         _purge();
     }
+}
 
-    // TODO configurable limit of StatementStats, and method to remove (the oldest ones).
+void SessionStats::purge()
+{
+    _purge();
 }
 namespace
 {
@@ -196,35 +200,27 @@ struct NonZeroEntry
 
 void SessionStats::_purge() const
 {
+    base::StopWatch sw;
     _cleanupCountdown = CleanupCountdown;
     // erase entries up to the first non-zero one
     auto ite = find_if(_statementStats.begin(), _statementStats.end(), NonZeroEntry());
+    // The gcc 4.4 vector::erase bug only happens if iterators are the same.
     if (ite != _statementStats.begin())
     {
-        //base::StopWatch sw;
-        // quick and dirty workaround for the gcc 4.4 vector::erase bug
-        decltype(_statementStats) newVec;
-        newVec.reserve(_statementStats.capacity());
-        for (auto first = ite; ite != _statementStats.end(); ++first, ++ite)
-        {
-            newVec.emplace_back(std::move(*ite));
-        }
-        _statementStats.swap(newVec);
+        _statementStats.erase(_statementStats.begin(), ite);
         //std::cout << "SessionStats::_purge " << sw.lap() << '\n';
     }
 }
 
-std::ostream& operator<<(std::ostream& os, const StatementId& id)
+// OUTPUT
+void SessionStats::streamHumanReadable(std::ostream& os) const
 {
-    os << id.first << ' ' << (id.second ? "subquery:" : ":");
-    return os;
-}
-
-std::ostream& operator<<(std::ostream& os, const StatementStats& stmStats)
-{
-    os << stmStats.statementId() << " " << stmStats.count();
-
-    return os;
+    _purge();
+    os << "Session: " << _sessId << ' ' << _user << ". Window: " << _timeWindow << '\n';
+    for (auto ite = _statementStats.begin(); ite != _statementStats.end(); ++ite)
+    {
+        os << *ite << '\n';
+    }
 }
 
 void streamTotalsHumanReadable(std::ostream& os, const std::vector<SessionData>& sessions)
@@ -246,13 +242,17 @@ void streamTotalsHumanReadable(std::ostream& os, const std::vector<SessionData>&
     }
 };
 
-// This section needed for gcc 4.4 to use move semantics and variadics.
-StatementStats::StatementStats(StatementStats && ss) :
-    _statementId(std::move(ss._statementId)),
-    _timeWindow(std::move(ss._timeWindow)),
-    _timestampsOptimized(std::move(ss._timestampsOptimized)),
-    _timestampsExact(std::move(ss._timestampsExact))
+std::ostream& operator<<(std::ostream& os, const StatementId& id)
 {
+    os << id.first << ' ' << (id.second ? "subquery:" : ":");
+    return os;
+}
+
+std::ostream& operator<<(std::ostream& os, const StatementStats& stmStats)
+{
+    os << stmStats.statementId() << " " << stmStats.count();
+
+    return os;
 }
 
 StatementStats &StatementStats::operator=(StatementStats && ss)
@@ -263,6 +263,16 @@ StatementStats &StatementStats::operator=(StatementStats && ss)
     _timestampsExact = std::move(ss._timestampsExact);
 
     return *this;
+}
+
+// EXTRA
+// This section needed for gcc 4.4 to use move semantics and variadics.
+StatementStats::StatementStats(StatementStats && ss) :
+    _statementId(std::move(ss._statementId)),
+    _timeWindow(std::move(ss._timeWindow)),
+    _timestampsOptimized(std::move(ss._timestampsOptimized)),
+    _timestampsExact(std::move(ss._timestampsExact))
+{
 }
 
 SessionStats::SessionStats(SessionStats&& ss) :
