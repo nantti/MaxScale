@@ -1,4 +1,4 @@
-#include "stmstats.h"
+#include "statementstats.h"
 #include <algorithm>
 #include <iostream>
 #include <iomanip>
@@ -28,7 +28,7 @@ void StatementStats::increment()
         Timepoint inSeconds = time_point_cast<seconds>(base::Clock::now());
         if (_timestampsOptimized.empty() || _timestampsOptimized.back().timepoint != inSeconds)
         {
-            _timestampsOptimized.push_back(Timestamp(inSeconds, 1));
+            _timestampsOptimized.emplace_back(inSeconds, 1);
         }
         else
         {
@@ -38,7 +38,7 @@ void StatementStats::increment()
     }
     else
     {
-        _timestampsExact.push_back(base::Clock::now());
+        _timestampsExact.emplace_back(base::Clock::now());
     }
 }
 
@@ -61,8 +61,10 @@ struct TimePointLessEqual
 
 void StatementStats::_purge() const
 {
+    //base::StopWatch sw;
     auto windowBegin = base::Clock::now() - _timeWindow;
-    // code duplication alomst. Templetizing Timestamp would make this clearer.
+
+    // code duplication, alomst. Templetizing Timestamp would not make this clearer.
     if (TimestampsOptimized)
     {
         if (!_timestampsOptimized.empty() &&
@@ -71,6 +73,7 @@ void StatementStats::_purge() const
             auto ite = std::find_if(_timestampsOptimized.begin(), _timestampsOptimized.end(),
                                     TimePointLessEqual(windowBegin));
             _timestampsOptimized.erase(_timestampsOptimized.begin(), ite);
+            //std::cout << "StatementStats::_purge " << sw.lap() << '\n';
         }
     }
     else
@@ -80,6 +83,7 @@ void StatementStats::_purge() const
             auto ite = std::find_if(_timestampsExact.begin(), _timestampsExact.end(),
                                     TimePointLessEqual(windowBegin));
             _timestampsExact.erase(_timestampsExact.begin(), ite);
+            //std::cout << "StatementStats::_purge " << sw.lap() << '\n';
         }
     }
 }
@@ -105,15 +109,15 @@ int StatementStats::count() const
 
 const int CleanupCountdown = 12;
 
-SessionStats::SessionStats(const SessionId& sessId, base::Duration timeWindow) :
-    _sessId(sessId), _timeWindow(timeWindow), _cleanupCountdown(CleanupCountdown)
+SessionStats::SessionStats(const SessionId& sessId, const std::string &user, base::Duration timeWindow) :
+    _sessId(sessId), _user(user), _timeWindow(timeWindow), _cleanupCountdown(CleanupCountdown)
 {
 }
 
 void SessionStats::streamHumanReadable(std::ostream& os) const
 {
     _purge();
-    os << _sessId << "  window: " << _timeWindow << '\n';
+    os << "Session: " << _sessId << ' ' << _user << ". Window: " << _timeWindow << '\n';
     for (auto ite = _statementStats.begin(); ite != _statementStats.end(); ++ite)
     {
         os << *ite << '\n';
@@ -160,7 +164,7 @@ void SessionStats::increment(const StatementId& statementId)
     auto ite = find_if(_statementStats.begin(), _statementStats.end(), MatchStmId(statementId));
     if (ite == _statementStats.end())
     {
-        _statementStats.push_back(StatementStats(statementId, _timeWindow));
+        _statementStats.emplace_back(statementId, _timeWindow);
     }
     else
     {
@@ -195,18 +199,24 @@ void SessionStats::_purge() const
     _cleanupCountdown = CleanupCountdown;
     // erase entries up to the first non-zero one
     auto ite = find_if(_statementStats.begin(), _statementStats.end(), NonZeroEntry());
-    _statementStats.erase(_statementStats.begin(), ite);
+    if (ite != _statementStats.begin())
+    {
+        //base::StopWatch sw;
+        // quick and dirty workaround for the gcc 4.4 vector::erase bug
+        decltype(_statementStats) newVec;
+        newVec.reserve(_statementStats.capacity());
+        for (auto first = ite; ite != _statementStats.end(); ++first, ++ite)
+        {
+            newVec.emplace_back(std::move(*ite));
+        }
+        _statementStats.swap(newVec);
+        //std::cout << "SessionStats::_purge " << sw.lap() << '\n';
+    }
 }
 
 std::ostream& operator<<(std::ostream& os, const StatementId& id)
 {
     os << id.first << ' ' << (id.second ? "subquery:" : ":");
-    return os;
-}
-
-std::ostream& operator<<(std::ostream& os, const SessionId& id)
-{
-    os << "Session: " << id.first << ' ' << id.second;
     return os;
 }
 
@@ -217,13 +227,12 @@ std::ostream& operator<<(std::ostream& os, const StatementStats& stmStats)
     return os;
 }
 
-
-void streamTotalsHumanReadable(std::ostream& os, const std::vector<SessionStats>& sessions)
+void streamTotalsHumanReadable(std::ostream& os, const std::vector<SessionData>& sessions)
 {
     std::map<StatementId, int> counts;
     for (auto session = sessions.begin(); session != sessions.end(); ++session)
     {
-        const auto& stms = session->statementStats();
+        const auto& stms = session->sessionStats.statementStats();
         for (auto stm = stms.begin(); stm != stms.end(); ++stm)
         {
             counts[stm->statementId()] += stm->count();
@@ -236,4 +245,56 @@ void streamTotalsHumanReadable(std::ostream& os, const std::vector<SessionStats>
         os << "  " << ite->first << " " << ite->second << '\n';
     }
 };
+
+// This section needed for gcc 4.4 to use move semantics and variadics.
+StatementStats::StatementStats(StatementStats && ss) :
+    _statementId(std::move(ss._statementId)),
+    _timeWindow(std::move(ss._timeWindow)),
+    _timestampsOptimized(std::move(ss._timestampsOptimized)),
+    _timestampsExact(std::move(ss._timestampsExact))
+{
+}
+
+StatementStats &StatementStats::operator=(StatementStats && ss)
+{
+    _statementId = std::move(ss._statementId);
+    _timeWindow = std::move(ss._timeWindow);
+    _timestampsOptimized = std::move(ss._timestampsOptimized);
+    _timestampsExact = std::move(ss._timestampsExact);
+
+    return *this;
+}
+
+SessionStats::SessionStats(SessionStats&& ss) :
+    _sessId(std::move(ss._sessId)),
+    _user(std::move(ss._user)),
+    _timeWindow(std::move(ss._timeWindow)),
+    _cleanupCountdown(std::move(ss._cleanupCountdown)),
+    _statementStats(std::move(ss._statementStats))
+{
+}
+
+SessionStats &SessionStats::operator=(SessionStats&& ss)
+{
+    _sessId = std::move(ss._sessId);
+    _user = std::move(ss._user);
+    _timeWindow = std::move(ss._timeWindow);
+    _cleanupCountdown = std::move(ss._cleanupCountdown);
+    _statementStats = std::move(ss._statementStats);
+
+    return *this;
+}
+
+SessionData::SessionData(CounterSession*&& session_, SessionStats&& sessionStats_) :
+    counterSession(std::move(session_)), sessionStats(std::move(sessionStats_))
+{}
+SessionData::SessionData(SessionData&& sd) :
+    counterSession(std::move(sd.counterSession)), sessionStats(std::move(sd.sessionStats))
+{}
+SessionData& SessionData::operator=(SessionData&& sd)
+{
+    counterSession = std::move(sd.counterSession);
+    sessionStats = std::move(sd.sessionStats);
+    return *this;
+}
 } // stm_counter

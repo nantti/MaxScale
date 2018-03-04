@@ -34,17 +34,22 @@ namespace stm_counter
 // the coding standards, or the standard in surrounding code when modifying
 // something.
 
-// Session ID. {int maxscale_sid; std::string user}. User included for better output.
-typedef std::pair<uint64_t, std::string> SessionId;
+// Session ID same as maxscale_sid
+typedef uint64_t SessionId;
 
 // Statement Id, {std::string statement, bool isSubQuery}.
 typedef std::pair<std::string, bool> StatementId;
 
-// Statistics of a SQL statement. Not thread safe.
+// Statistics of a SQL statement. Not thread safe. Copies made, needs C++11.
 class StatementStats
 {
+    StatementStats(const StatementStats&);
+    StatementStats& operator=(const StatementStats&);
 public:
-    StatementStats(const StatementId& statementId, base::Duration timeWindow);
+    explicit StatementStats(const StatementId& statementId, base::Duration timeWindow);
+    StatementStats(StatementStats&&);  // can't be defaulted in gcc 4.4
+    StatementStats& operator=(StatementStats&&); // can't be defaulted in gcc 4.4
+
     const StatementId& statementId() const {return _statementId;}
     base::Duration timeWindow() const {return _timeWindow;}
 
@@ -62,16 +67,22 @@ public:
 private:
     StatementId _statementId;
     base::Duration _timeWindow;
+    // One extra vector. Would need to templetize for one only.
     mutable std::vector<Timestamp> _timestampsOptimized;
     mutable std::vector<base::TimePoint> _timestampsExact;  // not optimized
     void _purge() const; // remove out of window stats
 };
 
-// Stats for a Session. Not thread safe.
+// Stats for a Session. Not thread safe. Copiable, needs C++11.
 class SessionStats
 {
 public:
-    SessionStats(const SessionId& sessId, base::Duration timeWindow);
+    SessionStats(const SessionId& sessId, const std::string& user, base::Duration timeWindow);
+    SessionStats(const SessionStats&) = delete;
+    SessionStats& operator=(const SessionStats&) = delete;
+    SessionStats(SessionStats &&);  // can't be defaulted in gcc 4.4
+    SessionStats& operator=(SessionStats&&); // can't be defaulted in gcc 4.4
+
     const SessionId& sessionId() const {return _sessId;};
     base::Duration timeWindow() const {return _timeWindow;};
     void streamHumanReadable(std::ostream& os) const;
@@ -81,6 +92,7 @@ public:
     void increment(const StatementId& statementId);
 private:
     SessionId _sessId;
+    std::string _user;
     base::Duration _timeWindow;
     mutable int _cleanupCountdown;
     mutable std::vector<StatementStats> _statementStats;
@@ -88,10 +100,25 @@ private:
     void _purge() const; // remove out of window stats
 };
 
-void streamTotalsHumanReadable(std::ostream& os, const std::vector<SessionStats>& sessions);
-void streamTotalsJson(std::ostream& os, const std::vector<SessionStats>& sessions);
+// For the filter
+class CounterSession;
+struct SessionData
+{
+    CounterSession* counterSession;
+    SessionStats    sessionStats;
 
-std::ostream& operator<<(std::ostream& os, const SessionId& id);
+    // This section needed for gcc 4.4 to use move semantics and variadics.
+    // Here be dragons! gcc-4.4 calls this constructor even with lvalues.
+    SessionData(CounterSession*&& session_, SessionStats&& stats_);
+    SessionData(const SessionData&) = delete;
+    SessionData& operator=(const SessionData&) = delete;
+    SessionData(SessionData&& sd);
+    SessionData& operator=(SessionData&& sd);
+};
+
+void streamTotalsHumanReadable(std::ostream& os, const std::vector<SessionData>& sessions);
+void streamTotalsJson(std::ostream& os, const std::vector<SessionData>& sdata);
+
 std::ostream& operator<<(std::ostream& os, const StatementId& id);
 std::ostream& operator<<(std::ostream& os, const StatementStats& stats);
 
