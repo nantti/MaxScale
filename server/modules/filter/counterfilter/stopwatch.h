@@ -11,6 +11,7 @@
 
 #include <iosfwd>
 #include <utility>
+#include <string>
 
 namespace base
 {
@@ -45,6 +46,12 @@ std::pair<double, std::string> dur_to_human_readable(Duration dur);
 
 // Human readable output. No standard library for it yet.
 std::ostream& operator<<(std::ostream&, Duration dur);
+
+// Timepoint
+std::string timepoint_to_string(TimePoint tp, const std::string& fmt = "%F %T");
+std::ostream& operator<<(std::ostream&, TimePoint tp);
+
 } // base
+
 
 #endif // STOPWATCH_H

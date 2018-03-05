@@ -12,6 +12,7 @@
 #include <vector>
 #include <cstring>
 #include <iostream>
+#include <memory>
 
 // Classes to keep statistics of events.
 namespace stm_counter
@@ -90,11 +91,11 @@ class CounterSession;
 struct SessionData
 {
     CounterSession* counterSession;
-    SessionStats   sessionStats;
+    std::unique_ptr<SessionStats>  sessionStats;
 
     // This section needed for gcc 4.4 to use move semantics and variadics.
     // Here be dragons! gcc-4.4 calls this constructor even with lvalues.
-    SessionData(CounterSession*&& session_, SessionStats&& stats_);
+    SessionData(CounterSession*&& session_, std::unique_ptr<SessionStats> stats_);
     SessionData(const SessionData&) = delete;
     SessionData& operator=(const SessionData&) = delete;
     SessionData(SessionData&& sd);

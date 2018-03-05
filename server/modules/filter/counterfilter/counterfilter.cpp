@@ -47,22 +47,19 @@ static const MXS_ENUM_VALUE option_values[] =
     {"text",   stm_counter::Config::Text},
     {"json",   stm_counter::Config::Json},
     {"create", stm_counter::Config::Create},
-    {"append", stm_counter::Config::Append}
+    {"append", stm_counter::Config::Append},
+    {NULL}
 };
 
 
 namespace stm_counter
 {
-char commaToSpace(char ch)
-{
-    if (ch == ',') { return ' '; }
-    return ch;
-}
+std::vector<std::string> csvParse(const std::string& str);
 
 CounterFilter::CounterFilter(MXS_CONFIG_PARAMETER *params)
 {
     int timeWindow = config_get_integer(params, "time-window");
-    std::string event = config_get_string(params, "events");
+    std::string eventStr = config_get_string(params, "events");
     _config.fileType = static_cast<Config::FileType>
                        (config_get_enum(params, "file-type", option_values));
     _config.fileMode = static_cast<Config::FileMode>
@@ -73,47 +70,60 @@ CounterFilter::CounterFilter(MXS_CONFIG_PARAMETER *params)
     if (!timeWindow) { timeWindow = 60; }
     _config.timeWindow = base::Duration(std::chrono::seconds(timeWindow));
 
-    if (!event.empty())
+    if (!eventStr.empty() && eventStr != "*")
     {
         // accept comma and space separarated strings
-        std::transform(event.begin(), event.end(), event.begin(), commaToSpace);
-        std::transform(event.begin(), event.end(), event.begin(), ::toupper);
-        std::istringstream is(event);
-        while (is >> event) { _config.events.push_back(event); }
+        std::transform(eventStr.begin(), eventStr.end(),
+                       eventStr.begin(), ::toupper);
+        _config.eventFilter = csvParse(eventStr);
     }
 
     if (_config.fileType == -1) { _config.fileType = Config::Text; }
     if (_config.fileMode == -1) { _config.fileMode = Config::Append; }
+
+    if (!_config.reportFile.empty())
+    {
+        std::ifstream is(_config.reportFile.c_str());
+        if (!is)
+        {
+            MXS_ERROR("Could not open report-file %s. Check file permissions.",
+                      _config.reportFile.c_str());
+        }
+    }
+    if (!_config.totalsFile.empty())
+    {
+        std::ifstream is(_config.totalsFile.c_str());
+        if (!is)
+        {
+            MXS_ERROR("Could not open totals-file %s. Check file permissions.",
+                      _config.reportFile.c_str());
+        }
+    }
 }
 
 CounterFilter::~CounterFilter()
 {
 }
 
-CounterFilter* CounterFilter::create(const char* zName, char** pzOptions, MXS_CONFIG_PARAMETER* pParams)
+CounterFilter* CounterFilter::create(const char* zName, char** pzOptions, MXS_CONFIG_PARAMETER * pParams)
 {
     return new CounterFilter(pParams);
 }
 
-CounterSession* CounterFilter::newSession(MXS_SESSION* mxsSession)
+CounterSession* CounterFilter::newSession(MXS_SESSION * mxsSession)
 {
-    CounterSession* sess = new CounterSession(mxsSession, this);
+    std::unique_ptr<SessionStats> stats(new SessionStats(mxsSession->ses_id,
+                                                         mxsSession->client_dcb->user,
+                                                         _config.timeWindow));
+    // not paying for a shared ptr.
+    CounterSession* sess = new CounterSession(mxsSession, this, stats.get());
     SessionData sd
     {
         sess,
-        {
-            mxsSession->ses_id,
-            mxsSession->client_dcb->user,
-            _config.timeWindow
-        }
+        std::move(stats)
     };
     _sessionData.emplace_back(std::move(sd));
-    sess->setSessionStats(&_sessionData.back().sessionStats);
-
-    if (_sessionData.size() )
-    {
-        _nextReportTime = base::Clock::now() + _config.timeWindow;
-    }
+    _nextReportTime = base::Clock::now() + _config.timeWindow;
 
     return sess;
 }
@@ -126,12 +136,12 @@ struct BySessionSid
     BySessionSid(uint64_t s) : sid(s) {}
     bool operator()(const SessionData& ss)
     {
-        return sid == ss.sessionStats.sessionId();
+        return sid == ss.sessionStats->sessionId();
     }
 };
 }
 
-void CounterFilter::closeSession(MXS_FILTER *, MXS_FILTER_SESSION *session)
+void CounterFilter::closeSession(MXS_FILTER *, MXS_FILTER_SESSION * session)
 {
     // Should keep stats around until they expire. FIXME.
     CounterSession* stmSession = static_cast<CounterSession*>(session);
@@ -150,7 +160,7 @@ void CounterFilter::closeSession(MXS_FILTER *, MXS_FILTER_SESSION *session)
 }
 
 // static
-void CounterFilter::diagnostics(DCB* pDcb)
+void CounterFilter::diagnostics(DCB * pDcb)
 {
     base::StopWatch sw;
     std::ostringstream os;
@@ -178,15 +188,15 @@ void CounterFilter::statisticsChanged(CounterSession *)
     _report();
 }
 
-void CounterFilter::_fillReport(std::ostream &os)
+void CounterFilter::_fillReport(std::ostream & os)
 {
     for (auto ite = _sessionData.begin(); ite != _sessionData.end(); ++ite)
     {
-        ite->sessionStats.streamHumanReadable(os);
+        ite->sessionStats->streamHumanReadable(os);
     }
 }
 
-void CounterFilter::_fillTotalsReport(std::ostream &os)
+void CounterFilter::_fillTotalsReport(std::ostream & os)
 {
     streamTotalsHumanReadable(os, _sessionData);
 }
@@ -215,7 +225,7 @@ struct NotExpired
 {
     bool operator()(const SessionData& sd)
     {
-        return sd.counterSession == 0 && sd.sessionStats.empty();
+        return sd.counterSession == 0 && sd.sessionStats->empty();
     }
 };
 
@@ -227,4 +237,43 @@ void CounterFilter::_purge()
         _sessionData.erase(ite, _sessionData.end());
     }
 }
+// One millionth implementation. Csv parse, but without escapes.
+std::vector<std::string> csvParse(const std::string & str)
+{
+    const char * const whitespace = "\t\n\v\f\r ";
+    const char * const quotes = "'\"";
+
+    std::vector<std::string> ret;
+    if (str.empty()) { return ret; }
+
+    std::string::size_type b = 0, e = str.find_first_of(','), l = str.size();
+    while (42)
+    {
+        auto bb = str.find_first_not_of(whitespace, b); // trim whitespace
+        auto ee = str.find_last_not_of(whitespace, e - 1);
+        bb = str.find_first_not_of(quotes, bb); // trim quotes
+        ee = str.find_last_not_of(quotes, ee) + 1;
+
+        if (b == bb && str[b] == ',') // first char is a comma.
+        {
+            ret.push_back("");
+        }
+        else if (bb == std::string::npos) // last char is a comma.
+        {
+            ret.push_back("");
+            break;
+        }
+        else
+        {
+            ret.push_back(str.substr(bb, ee - bb));
+        }
+
+        if (e == std::string::npos) { break; }
+        b = ++e;
+        e = str.find_first_of(',', e);
+    }
+
+    return ret;
+}
+
 } // stm_counter

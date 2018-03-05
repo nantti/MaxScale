@@ -20,7 +20,7 @@ struct Config
     enum FileMode {Create, Append};
 
     base::Duration timeWindow;
-    std::vector<std::string> events;
+    std::vector<std::string> eventFilter;
     FileType    fileType;
     FileMode    fileMode;
     std::string reportFile;

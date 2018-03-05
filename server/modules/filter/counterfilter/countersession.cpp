@@ -54,18 +54,25 @@ int CounterSession::routeQuery(GWBUF *buffer)
     // I meant to report subqueries, but support would need to be added
     // to query_classifier (rather than parsing here). It would be enough
     // to get the expression tree and then use that here. It could be as
-    // smart as you want, e.g. "alter table", rather than just alter.
-    // Could avoid counting if the query is either incorrect, or the server
-    // returned an error. On the other hand, why not count even if the
-    // statement does not exist... (like "selct", misspelled).
+    // smart as one wants, e.g. "alter table", rather than just alter.
 
     std::istringstream is(sql);
-    std::string op;
-    is >> op;
-    std::transform(op.begin(), op.end(), op.begin(), ::toupper);
-    _stats->increment(op);
-    _filter->statisticsChanged(this);
+    std::string stm;
+    is >> stm;
+    std::transform(stm.begin(), stm.end(), stm.begin(), ::toupper);
 
+    bool include = true;
+    auto events = _filter->config().eventFilter;
+
+    if (!events.empty())
+    {
+        include = std::find(events.begin(), events.end(), stm) != events.end();
+    }
+    if (include)
+    {
+        _stats->increment(stm);
+        _filter->statisticsChanged(this); // ine lieu of threads
+    }
     return mxs::FilterSession::routeQuery(buffer);
 }
 

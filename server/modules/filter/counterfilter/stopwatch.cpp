@@ -9,6 +9,7 @@
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include <ctime>
 
 namespace base
 {
@@ -29,6 +30,8 @@ Duration StopWatch::restart()
     _start = now;
     return lap;
 }
+
+
 }
 
 /********** OUTPUT ***********/
@@ -84,10 +87,28 @@ std::pair<double, std::string> dur_to_human_readable(Duration dur)
 std::ostream& operator<<(std::ostream& os, Duration dur)
 {
     auto p = dur_to_human_readable(dur);
-    os << p.first << p.second;
+    os << p.first << ' ' << p.second;
 
     return os;
 }
+
+std::string timepoint_to_string(TimePoint tp, const std::string &fmt)
+{
+    using namespace std::chrono;
+    std::time_t timet = system_clock::to_time_t(time_point_cast<seconds>(tp));
+    struct tm * ptm;
+    ptm = gmtime (&timet);
+    char buf[1024];
+    strftime(buf, 1024, fmt.c_str(), ptm);
+    return buf;
+}
+
+std::ostream &operator<<(std::ostream& os, TimePoint tp)
+{
+    os << timepoint_to_string(tp);
+    return os;
+}
+
 }
 
 void test_stopwatch_output(std::ostream& os)

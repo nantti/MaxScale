@@ -233,7 +233,9 @@ void SessionStats::streamHumanReadable(std::ostream& os) const
     _purge();
     if (!_statementStats.empty())
     {
-        os << "Session: " << _sessId << " User:" << _user << " TimeWindow: " << _timeWindow << '\n';
+        base::TimePoint tp = base::Clock::now();
+        os << "Session: " << _sessId << " User:" << _user
+           << " TimeWindow: " << _timeWindow << " at " << tp << '\n';
         for (auto ite = _statementStats.begin(); ite != _statementStats.end(); ++ite)
         {
             os << "  " << *ite << '\n';
@@ -248,7 +250,7 @@ void streamTotalsHumanReadable(std::ostream& os, const std::vector<SessionData> 
     std::map<StatementId, int> counts;
     for (auto session = sessions.begin(); session != sessions.end(); ++session)
     {
-        const auto& stms = session->sessionStats.statementStats();
+        const auto& stms = session->sessionStats->statementStats();
         for (auto stm = stms.begin(); stm != stms.end(); ++stm)
         {
             counts[stm->statementId()] += stm->count();
@@ -257,7 +259,9 @@ void streamTotalsHumanReadable(std::ostream& os, const std::vector<SessionData> 
 
     if (!counts.empty())
     {
-        os << "Totals: TimeWindow: " << sessions.front().sessionStats.timeWindow() << '\n';
+        base::TimePoint tp = base::Clock::now();
+        os << "Totals: TimeWindow: " << sessions.front().sessionStats->timeWindow()
+           << " at " << tp << '\n';
         for (auto ite = counts.begin(); ite != counts.end(); ++ite)
         {
             os << "  " << ite->first << ": " << ite->second << '\n';
@@ -306,16 +310,21 @@ SessionStats &SessionStats::operator=(SessionStats&& ss)
     return *this;
 }
 
-SessionData::SessionData(CounterSession*&& session_, SessionStats&& sessionStats_) :
+SessionData::SessionData(CounterSession*&& session_, std::unique_ptr<SessionStats> sessionStats_) :
     counterSession(std::move(session_)), sessionStats(std::move(sessionStats_))
-{}
+{
+}
 SessionData::SessionData(SessionData&& sd) :
     counterSession(std::move(sd.counterSession)), sessionStats(std::move(sd.sessionStats))
-{}
+{
+    sd.counterSession = 0;
+}
 SessionData& SessionData::operator=(SessionData&& sd)
 {
     counterSession = std::move(sd.counterSession);
     sessionStats = std::move(sd.sessionStats);
+    sd.counterSession = 0;
     return *this;
 }
+
 } // stm_counter
