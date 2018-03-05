@@ -15,25 +15,31 @@ namespace stm_counter
 // Memory usage difference is of course huge. For this example, the optimized version
 // uses numSessions*numStatementTypes*numSeconds = 10*4*2 = 80 entries, while the
 // non-optimized version uses 10,000,000 entries.
-// The gcc 4.4 does not use the small string optimization, so I tested with a little
-// QuckString class instead 30% faster.
-const bool TimestampsOptimized = false;
+// gcc 4.4 does not have the small string optimization, so I tested with a little
+// QuckString class instead, which made numbers above about 35% faster.
+// ... I made this depend on the timeWindow.
+namespace
+{
+bool timestampsOptimized = true; // outside of class to save on storage
+}
 
 // NOTE on this method. The statement-stats is simply a vector of timestamps where the
 // size() of the vector is the count. The _purge() function purges out-of-window timestamps.
-// The vector grows large in very volume and long time windows. The "optimized" version uses
+// The vector grows large with high volume or long time windows. The "optimized" version uses
 // a one second granularity, effectively grouping all events that happen in one second
 // into a single entry.
 StatementStats::StatementStats(const StatementId& statementId, base::Duration timeWindow) :
     _statementId(statementId), _timeWindow(timeWindow)
 {
+    // Maybe this should be configurable, or even dynamic based on volume. Should
+    // not be less than 10 seconds.
+    timestampsOptimized = (timeWindow < std::chrono::seconds(15)) ? false : true;
     increment();
 }
 
 void StatementStats::increment()
 {
-    // FIXME make configurable. Should purge once in awhile.
-    if (TimestampsOptimized)
+    if (timestampsOptimized)
     {
         using namespace std::chrono;
         Timepoint inSeconds = time_point_cast<seconds>(base::Clock::now());
@@ -75,26 +81,28 @@ void StatementStats::_purge() const
     base::StopWatch sw;
     auto windowBegin = base::Clock::now() - _timeWindow;
 
-    // code duplication, alomst. Templetizing Timestamp would not make this clearer.
-    if (TimestampsOptimized)
+    // code duplication, almost. Templetizing Timestamp would not make this much clearer.
+    if (timestampsOptimized)
     {
         if (!_timestampsOptimized.empty() &&
             _timestampsOptimized.front().timepoint < windowBegin)
         {
+            // never has a lot of entries, unless the time window is extremly long (days).
             auto ite = std::find_if(_timestampsOptimized.begin(), _timestampsOptimized.end(),
                                     TimePointLessEqual(windowBegin));
             _timestampsOptimized.erase(_timestampsOptimized.begin(), ite);
-            //std::cout << "StatementStats::_purge " << sw.lap() << '\n';
+            //std::cout << "Optimized StatementStats::_purge " << sw.lap() << '\n';
         }
     }
     else
     {
         if (!_timestampsExact.empty() && _timestampsExact.front() < windowBegin)
         {
+            // should be very fast, walking a vector of integers.
             auto ite = std::find_if(_timestampsExact.begin(), _timestampsExact.end(),
                                     TimePointLessEqual(windowBegin));
             _timestampsExact.erase(_timestampsExact.begin(), ite);
-            //std::cout << "StatementStats::_purge " << sw.lap() << '\n';
+            //std::cout << "Exact StatementStats::_purge " << sw.lap() << '\n';
         }
     }
 }
@@ -102,7 +110,7 @@ void StatementStats::_purge() const
 int StatementStats::count() const
 {
     _purge();
-    if (TimestampsOptimized)
+    if (timestampsOptimized)
     {
         int count {0};
         //#pragma omp parallel for reduction(max : count)
@@ -118,10 +126,12 @@ int StatementStats::count() const
     }
 }
 
-const int CleanupCountdown = 12;
+const int CleanupCountdown = 100000; // Purge once in awhile, could be configurable.
 
-SessionStats::SessionStats(const SessionId& sessId, const std::string &user, base::Duration timeWindow) :
-    _sessId(sessId), _user(user), _timeWindow(timeWindow), _cleanupCountdown(CleanupCountdown)
+SessionStats::SessionStats(const SessionId& sessId,
+                           const std::string &user, base::Duration timeWindow) :
+    _sessId(sessId), _user(user), _timeWindow(timeWindow),
+    _cleanupCountdown(CleanupCountdown)
 {
 }
 
@@ -134,6 +144,11 @@ const std::vector<StatementStats> &SessionStats::statementStats() const
 {
     _purge();
     return _statementStats;
+}
+
+bool SessionStats::empty() const
+{
+    return _statementStats.empty();
 }
 
 namespace
@@ -151,32 +166,23 @@ struct MatchStmId
 
 void SessionStats::increment(const StatementId& statementId)
 {
-    // What I really need here is an LRU-kind of structure, but a full blown LRU
-    // would mosty likely slow things down. Needs to be measured. Using vectors of
-    // not massive amounts of data, moving memory is very fast (if data is a pod).
-    // So the algo would be:
-    // 1. If an entry is new, push_back.
-    // 2. If the entry exists, move all entries after it one step to the left, put the entry last.
-    // 3. Always search in reverse order since entries towards the end are more likely to be used.
-    // 4. Once in awhile purge entries with count()==0.
-    // Need to measure.
+    // Always putting the incremented entry (latest timestamp) last in the vector (using
+    // rotate). This means the vector is ordered so that expired entries are always first.
 
-    // Look in reverse order, the entry is likely to be towards the end
-    auto ite = find_if(_statementStats.begin(), _statementStats.end(), MatchStmId(statementId));
+    auto ite = find_if(_statementStats.begin(), _statementStats.end(),
+                       MatchStmId(statementId));
     if (ite == _statementStats.end())
     {
         _statementStats.emplace_back(statementId, _timeWindow);
     }
     else
     {
-        // This would be very fast with c++11, since pod data would simply be memmove:ed.
         ite->increment();
-        auto middle = ite;
-        ++middle;
-        std::rotate(ite, middle, _statementStats.end());
+        // rotate so that the entry becomes the last one
+        auto next = std::next(ite);
+        std::rotate(ite, next, _statementStats.end());
     }
 
-    // TODO make this configurable, if needed.
     if (!--_cleanupCountdown)
     {
         _purge();
@@ -187,6 +193,7 @@ void SessionStats::purge()
 {
     _purge();
 }
+
 namespace
 {
 struct NonZeroEntry
@@ -212,19 +219,32 @@ void SessionStats::_purge() const
     }
 }
 
-// OUTPUT
+// OUTPUT follows
+
+std::ostream& operator<<(std::ostream& os, const StatementStats& stmStats)
+{
+    os << stmStats.statementId() << ": " << stmStats.count();
+
+    return os;
+}
+
 void SessionStats::streamHumanReadable(std::ostream& os) const
 {
     _purge();
-    os << "Session: " << _sessId << ' ' << _user << ". Window: " << _timeWindow << '\n';
-    for (auto ite = _statementStats.begin(); ite != _statementStats.end(); ++ite)
+    if (!_statementStats.empty())
     {
-        os << *ite << '\n';
+        os << "Session: " << _sessId << " User:" << _user << " TimeWindow: " << _timeWindow << '\n';
+        for (auto ite = _statementStats.begin(); ite != _statementStats.end(); ++ite)
+        {
+            os << "  " << *ite << '\n';
+        }
     }
 }
 
-void streamTotalsHumanReadable(std::ostream& os, const std::vector<SessionData>& sessions)
+void streamTotalsHumanReadable(std::ostream& os, const std::vector<SessionData> &sessions)
 {
+    if (sessions.empty()) { return; }
+
     std::map<StatementId, int> counts;
     for (auto session = sessions.begin(); session != sessions.end(); ++session)
     {
@@ -235,25 +255,16 @@ void streamTotalsHumanReadable(std::ostream& os, const std::vector<SessionData>&
         }
     } // stm_counter
 
-    os << "Totals:\n";
-    for (auto ite = counts.begin(); ite != counts.end(); ++ite)
+    if (!counts.empty())
     {
-        os << "  " << ite->first << " " << ite->second << '\n';
+        os << "Totals: TimeWindow: " << sessions.front().sessionStats.timeWindow() << '\n';
+        for (auto ite = counts.begin(); ite != counts.end(); ++ite)
+        {
+            os << "  " << ite->first << ": " << ite->second << '\n';
+        }
     }
 };
 
-std::ostream& operator<<(std::ostream& os, const StatementId& id)
-{
-    os << id.first << ' ' << (id.second ? "subquery:" : ":");
-    return os;
-}
-
-std::ostream& operator<<(std::ostream& os, const StatementStats& stmStats)
-{
-    os << stmStats.statementId() << " " << stmStats.count();
-
-    return os;
-}
 
 StatementStats &StatementStats::operator=(StatementStats && ss)
 {

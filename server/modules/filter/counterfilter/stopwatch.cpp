@@ -84,7 +84,7 @@ std::pair<double, std::string> dur_to_human_readable(Duration dur)
 std::ostream& operator<<(std::ostream& os, Duration dur)
 {
     auto p = dur_to_human_readable(dur);
-    os << p.first << ' ' << p.second;
+    os << p.first << p.second;
 
     return os;
 }

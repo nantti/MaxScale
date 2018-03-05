@@ -5,10 +5,10 @@
  * This software is released under the MIT License.
  */
 
-//#include <maxscale/cppdefs.hh>
 #include <maxscale/filter.hh>
+#include "stopwatch.h"
 
-
+// The CounterSession updates statistics, the CounterFilter does the reporting.
 namespace stm_counter
 {
 class CounterFilter;
@@ -17,18 +17,19 @@ class SessionStats;
 class CounterSession : public maxscale::FilterSession
 {
 public:
+    CounterSession(MXS_SESSION* pSession, CounterFilter * filter, SessionStats* stats);
     CounterSession(const CounterSession&) = delete;
-    CounterSession& operator = (const CounterSession&)  = delete;;
+    CounterSession& operator = (const CounterSession&)  = delete;
 
-    static CounterSession* create(MXS_SESSION* mxsSession);
     int routeQuery(GWBUF* buffer);
     int64_t sessionId();
 
-    void setSessionStats(SessionStats* stats) {_stats = stats;}
+    void setFilter(CounterFilter* filter);
+    void setSessionStats(SessionStats* stats);
 
     ~CounterSession();
 private:
-    CounterSession(MXS_SESSION* pSession);
+    CounterFilter * _filter;
     SessionStats* _stats;
 };
 } // stm_counter
