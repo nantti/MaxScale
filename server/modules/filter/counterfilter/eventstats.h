@@ -10,31 +10,29 @@
 #include <iosfwd>
 #include <chrono>
 #include <vector>
-#include <cstring>
-#include <iostream>
 #include <memory>
 
-// Classes to keep statistics of events.
+// Keep statistics, or counts, of events over a
+// given time window into the past (e.g. last 10 seconds).
 namespace stm_counter
 {
-// Session ID same as maxscale_sid
+// Session ID same as maxscale sid
 typedef uint64_t SessionId;
 
-// Statement Id. A string so the event statistics can be kept for anything
-// (so this is not really a statement counter).
-typedef std::string StatementId;
+// Event Id. A string so the event statistics can be kept for anything.
+typedef std::string EventId;
 
-// Statistics for a specific event. Not thread safe.
-class StatementStats
+// Time series statistics for a specific event. Not thread safe.
+class EventStat
 {
-    StatementStats(const StatementStats&);
-    StatementStats& operator=(const StatementStats&);
+    EventStat(const EventStat&);
+    EventStat& operator=(const EventStat&);
 public:
-    explicit StatementStats(const StatementId& statementId, base::Duration timeWindow);
-    StatementStats(StatementStats&&);  // can't be defaulted in gcc 4.4
-    StatementStats& operator=(StatementStats&&); // can't be defaulted in gcc 4.4
+    explicit EventStat(const EventId& eventId, base::Duration timeWindow);
+    EventStat(EventStat&&);  // can't be defaulted in gcc 4.4
+    EventStat& operator=(EventStat&&); // can't be defaulted in gcc 4.4
 
-    const StatementId& statementId() const {return _statementId;}
+    const EventId& eventId() const {return _eventId;}
     base::Duration timeWindow() const {return _timeWindow;}
 
     int count() const;
@@ -49,7 +47,7 @@ public:
         Timestamp(Timepoint p, int c) : timepoint(p), count(c) {}
     };
 private:
-    StatementId _statementId;
+    EventId _eventId;
     base::Duration _timeWindow;
     // One extra vector. Would need to templetize for one only. Keeping it simple for now.
     mutable std::vector<Timestamp> _timestampsOptimized;
@@ -57,7 +55,7 @@ private:
     void _purge() const; // remove out of window stats
 };
 
-// Stats for a Session. Not thread safe.
+// Time series statistics for a Session (broadly a collection of EventStats). Not thread safe.
 class SessionStats
 {
 public:
@@ -68,24 +66,23 @@ public:
     SessionStats& operator=(SessionStats&&); // can't be defaulted in gcc 4.4
 
     const SessionId& sessionId() const {return _sessId;};
+    const std::string& user() const {return _user;};
     base::Duration timeWindow() const {return _timeWindow;};
-    void streamHumanReadable(std::ostream& os) const;
-    void streamJson(std::ostream& os) const;
-    const std::vector<StatementStats>& statementStats() const;
+    const std::vector<EventStat>& eventStats() const; // note, does a purge.
+    void dump(std::ostream& os) const;
     bool empty() const; // no stats
 
-    void increment(const StatementId& statementId);
+    void increment(const EventId& eventId);
     void purge(); // do a purge, for timing.
 private:
     SessionId _sessId;
     std::string _user;
     base::Duration _timeWindow;
     mutable int _cleanupCountdown;
-    mutable std::vector<StatementStats> _statementStats;
+    mutable std::vector<EventStat> _eventStats;
 
     void _purge() const; // remove out of window stats
 };
-
 // Custom made for the filter, but without dependencies back to the filter.
 class CounterSession;
 struct SessionData
@@ -102,9 +99,9 @@ struct SessionData
     SessionData& operator=(SessionData&& sd);
 };
 
-void streamTotalsHumanReadable(std::ostream& os, const std::vector<SessionData>& sessions);
-void streamTotalsJson(std::ostream& os, const std::vector<SessionData>& sdata);
+void dump(std::ostream& os, const std::vector<SessionData>& sessions);
+void dumpTotals(std::ostream& os, const std::vector<SessionData>& sessions);
 
-std::ostream& operator<<(std::ostream& os, const StatementStats& stats);
+std::ostream& operator<<(std::ostream& os, const EventStat& stats);
 
 } // stm_counter

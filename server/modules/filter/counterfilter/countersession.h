@@ -22,6 +22,7 @@ public:
     CounterSession& operator = (const CounterSession&)  = delete;
 
     int routeQuery(GWBUF* buffer);
+    void close();
     int64_t sessionId();
 
     void setFilter(CounterFilter* filter);

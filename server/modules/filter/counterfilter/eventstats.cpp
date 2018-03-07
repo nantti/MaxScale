@@ -1,7 +1,8 @@
-#include "statementstats.h"
+#include "eventstats.h"
 #include <algorithm>
 #include <iostream>
 #include <iomanip>
+#include <sstream>
 #include <map>
 
 namespace stm_counter
@@ -16,28 +17,27 @@ namespace stm_counter
 // uses numSessions*numStatementTypes*numSeconds = 10*4*2 = 80 entries, while the
 // non-optimized version uses 10,000,000 entries.
 // gcc 4.4 does not have the small string optimization, so I tested with a little
-// QuckString class instead, which made numbers above about 35% faster.
-// ... I made this depend on the timeWindow.
+// QuckString class instead (in git), which made numbers above about 35% faster.
 namespace
 {
 bool timestampsOptimized = true; // outside of class to save on storage
 }
 
-// NOTE on this method. The statement-stats is simply a vector of timestamps where the
+// NOTE on this method. The event-stats is simply a vector of timestamps where the
 // size() of the vector is the count. The _purge() function purges out-of-window timestamps.
 // The vector grows large with high volume or long time windows. The "optimized" version uses
 // a one second granularity, effectively grouping all events that happen in one second
-// into a single entry.
-StatementStats::StatementStats(const StatementId& statementId, base::Duration timeWindow) :
-    _statementId(statementId), _timeWindow(timeWindow)
+// into a single entry. The choise of optimized vs exact is made based on window size.
+EventStat::EventStat(const EventId& eventId, base::Duration timeWindow) :
+    _eventId(eventId), _timeWindow(timeWindow)
 {
     // Maybe this should be configurable, or even dynamic based on volume. Should
     // not be less than 10 seconds.
-    timestampsOptimized = (timeWindow < std::chrono::seconds(15)) ? false : true;
+    timestampsOptimized = (timeWindow < std::chrono::seconds(30)) ? false : true;
     increment();
 }
 
-void StatementStats::increment()
+void EventStat::increment()
 {
     if (timestampsOptimized)
     {
@@ -65,7 +65,7 @@ struct TimePointLessEqual
 {
     base::TimePoint lhs;
     TimePointLessEqual(base::TimePoint tp) : lhs(tp) {}
-    bool operator()(const StatementStats::Timestamp& rhs) const
+    bool operator()(const EventStat::Timestamp& rhs) const
     {
         return lhs <= rhs.timepoint;
     }
@@ -76,12 +76,14 @@ struct TimePointLessEqual
 };
 }
 
-void StatementStats::_purge() const
+void EventStat::_purge() const
 {
     base::StopWatch sw;
     auto windowBegin = base::Clock::now() - _timeWindow;
 
-    // code duplication, almost. Templetizing Timestamp would not make this much clearer.
+    // code duplication, almost. Templetizing would not make this much clearer,
+    // but should be made for a production utility, that also needs to make thread safety
+    // a template policy.
     if (timestampsOptimized)
     {
         if (!_timestampsOptimized.empty() &&
@@ -91,7 +93,7 @@ void StatementStats::_purge() const
             auto ite = std::find_if(_timestampsOptimized.begin(), _timestampsOptimized.end(),
                                     TimePointLessEqual(windowBegin));
             _timestampsOptimized.erase(_timestampsOptimized.begin(), ite);
-            //std::cout << "Optimized StatementStats::_purge " << sw.lap() << '\n';
+            //std::cout << "Optimized EventStat::_purge " << sw.lap() << '\n';
         }
     }
     else
@@ -102,12 +104,12 @@ void StatementStats::_purge() const
             auto ite = std::find_if(_timestampsExact.begin(), _timestampsExact.end(),
                                     TimePointLessEqual(windowBegin));
             _timestampsExact.erase(_timestampsExact.begin(), ite);
-            //std::cout << "Exact StatementStats::_purge " << sw.lap() << '\n';
+            //std::cout << "Exact EventStat::_purge " << sw.lap() << '\n';
         }
     }
 }
 
-int StatementStats::count() const
+int EventStat::count() const
 {
     _purge();
     if (timestampsOptimized)
@@ -126,7 +128,8 @@ int StatementStats::count() const
     }
 }
 
-const int CleanupCountdown = 100000; // Purge once in awhile, could be configurable.
+// Force a purge once in awhile, could be configurable.
+const int CleanupCountdown = 100000;
 
 SessionStats::SessionStats(const SessionId& sessId,
                            const std::string &user, base::Duration timeWindow) :
@@ -135,52 +138,50 @@ SessionStats::SessionStats(const SessionId& sessId,
 {
 }
 
-void SessionStats::streamJson(std::ostream& os) const
+const std::vector<EventStat> &SessionStats::eventStats() const
 {
     _purge();
-}
-
-const std::vector<StatementStats> &SessionStats::statementStats() const
-{
-    _purge();
-    return _statementStats;
+    return _eventStats;
 }
 
 bool SessionStats::empty() const
 {
-    return _statementStats.empty();
+    _purge();
+    return _eventStats.empty();
 }
 
 namespace
 {
-struct MatchStmId
+struct MatchEventId
 {
-    StatementId statementId;
-    MatchStmId(const StatementId& id) : statementId(id) {};
-    bool operator()(const StatementStats& stats) const
+    EventId eventId;
+    MatchEventId(const EventId& id) : eventId(id) {};
+    bool operator()(const EventStat& stats) const
     {
-        return statementId == stats.statementId();
+        return eventId == stats.eventId();
     }
 };
 }
 
-void SessionStats::increment(const StatementId& statementId)
+void SessionStats::increment(const EventId& eventId)
 {
-    // Always putting the incremented entry (latest timestamp) last in the vector (using
+    // Always put the incremented entry (latest timestamp) last in the vector (using
     // rotate). This means the vector is ordered so that expired entries are always first.
 
-    auto ite = find_if(_statementStats.begin(), _statementStats.end(),
-                       MatchStmId(statementId));
-    if (ite == _statementStats.end())
+    // Find in reverse, the entry is more likely to be towards the end. Actually no,
+    // for some reason the normal search is slightly faster when measured.
+    auto ite = find_if(_eventStats.begin(), _eventStats.end(),
+                       MatchEventId(eventId));
+    if (ite == _eventStats.end())
     {
-        _statementStats.emplace_back(statementId, _timeWindow);
+        _eventStats.emplace_back(eventId, _timeWindow);
     }
     else
     {
         ite->increment();
         // rotate so that the entry becomes the last one
         auto next = std::next(ite);
-        std::rotate(ite, next, _statementStats.end());
+        std::rotate(ite, next, _eventStats.end());
     }
 
     if (!--_cleanupCountdown)
@@ -189,7 +190,7 @@ void SessionStats::increment(const StatementId& statementId)
     }
 }
 
-void SessionStats::purge()
+void SessionStats::purge() // this is just for testing
 {
     _purge();
 }
@@ -198,7 +199,7 @@ namespace
 {
 struct NonZeroEntry
 {
-    bool operator()(const StatementStats& stats)
+    bool operator()(const EventStat& stats)
     {
         return stats.count() != 0;
     }
@@ -210,69 +211,85 @@ void SessionStats::_purge() const
     base::StopWatch sw;
     _cleanupCountdown = CleanupCountdown;
     // erase entries up to the first non-zero one
-    auto ite = find_if(_statementStats.begin(), _statementStats.end(), NonZeroEntry());
+    auto ite = find_if(_eventStats.begin(), _eventStats.end(), NonZeroEntry());
     // The gcc 4.4 vector::erase bug only happens if iterators are the same.
-    if (ite != _statementStats.begin())
+    if (ite != _eventStats.begin())
     {
-        _statementStats.erase(_statementStats.begin(), ite);
+        _eventStats.erase(_eventStats.begin(), ite);
         //std::cout << "SessionStats::_purge " << sw.lap() << '\n';
     }
 }
 
 // OUTPUT follows
 
-std::ostream& operator<<(std::ostream& os, const StatementStats& stmStats)
+std::ostream& operator<<(std::ostream& os, const EventStat& eventStats)
 {
-    os << stmStats.statementId() << ": " << stmStats.count();
+    os << eventStats.eventId() << ": " << eventStats.count();
 
     return os;
 }
 
-void SessionStats::streamHumanReadable(std::ostream& os) const
+void dumpHeader(std::ostream& os, const SessionStats* stats, const std::string& type)
+{
+    base::TimePoint tp = base::Clock::now();
+    os << type << ": Time:" << tp
+       << " Time Window: " << stats->timeWindow() << '\n';
+}
+
+void SessionStats::dump(std::ostream& os) const
 {
     _purge();
-    if (!_statementStats.empty())
+    if (!_eventStats.empty())
     {
-        base::TimePoint tp = base::Clock::now();
-        os << "Session: " << _sessId << " User:" << _user
-           << " TimeWindow: " << _timeWindow << " at " << tp << '\n';
-        for (auto ite = _statementStats.begin(); ite != _statementStats.end(); ++ite)
+        os << "  Session: " << _sessId << " User: " << _user << '\n';
+        for (auto ite = _eventStats.begin(); ite != _eventStats.end(); ++ite)
         {
-            os << "  " << *ite << '\n';
+            os << "    " << *ite << '\n';
         }
     }
 }
 
-void streamTotalsHumanReadable(std::ostream& os, const std::vector<SessionData> &sessions)
+void dump(std::ostream& os, const std::vector<SessionData>& sessions)
 {
     if (sessions.empty()) { return; }
 
-    std::map<StatementId, int> counts;
+    dumpHeader(os, sessions[0].sessionStats.get(), "SQL Statistics");
     for (auto session = sessions.begin(); session != sessions.end(); ++session)
     {
-        const auto& stms = session->sessionStats->statementStats();
-        for (auto stm = stms.begin(); stm != stms.end(); ++stm)
+        session->sessionStats->dump(os);
+    }
+}
+
+void dumpTotals(std::ostream& os, const std::vector<SessionData> &sessions)
+{
+    if (sessions.empty()) { return; }
+
+    std::map<EventId, int> counts;
+    for (auto session = sessions.begin(); session != sessions.end(); ++session)
+    {
+        const auto& events = session->sessionStats->eventStats();
+        for (auto event = events.begin(); event != events.end(); ++event)
         {
-            counts[stm->statementId()] += stm->count();
+            counts[event->eventId()] += event->count();
         }
     } // stm_counter
 
     if (!counts.empty())
     {
-        base::TimePoint tp = base::Clock::now();
-        os << "Totals: TimeWindow: " << sessions.front().sessionStats->timeWindow()
-           << " at " << tp << '\n';
+        dumpHeader(os, sessions[0].sessionStats.get(), "SQL Statistics Totals");
         for (auto ite = counts.begin(); ite != counts.end(); ++ite)
         {
             os << "  " << ite->first << ": " << ite->second << '\n';
         }
     }
-};
+}
 
+// EXTRA
+// This section needed for gcc 4.4, to use move semantics and variadics.
 
-StatementStats &StatementStats::operator=(StatementStats && ss)
+EventStat &EventStat::operator=(EventStat && ss)
 {
-    _statementId = std::move(ss._statementId);
+    _eventId = std::move(ss._eventId);
     _timeWindow = std::move(ss._timeWindow);
     _timestampsOptimized = std::move(ss._timestampsOptimized);
     _timestampsExact = std::move(ss._timestampsExact);
@@ -280,10 +297,8 @@ StatementStats &StatementStats::operator=(StatementStats && ss)
     return *this;
 }
 
-// EXTRA
-// This section needed for gcc 4.4 to use move semantics and variadics.
-StatementStats::StatementStats(StatementStats && ss) :
-    _statementId(std::move(ss._statementId)),
+EventStat::EventStat(EventStat && ss) :
+    _eventId(std::move(ss._eventId)),
     _timeWindow(std::move(ss._timeWindow)),
     _timestampsOptimized(std::move(ss._timestampsOptimized)),
     _timestampsExact(std::move(ss._timestampsExact))
@@ -295,7 +310,7 @@ SessionStats::SessionStats(SessionStats&& ss) :
     _user(std::move(ss._user)),
     _timeWindow(std::move(ss._timeWindow)),
     _cleanupCountdown(std::move(ss._cleanupCountdown)),
-    _statementStats(std::move(ss._statementStats))
+    _eventStats(std::move(ss._eventStats))
 {
 }
 
@@ -305,7 +320,7 @@ SessionStats &SessionStats::operator=(SessionStats&& ss)
     _user = std::move(ss._user);
     _timeWindow = std::move(ss._timeWindow);
     _cleanupCountdown = std::move(ss._cleanupCountdown);
-    _statementStats = std::move(ss._statementStats);
+    _eventStats = std::move(ss._eventStats);
 
     return *this;
 }
