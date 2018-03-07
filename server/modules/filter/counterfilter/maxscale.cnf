@@ -1,0 +1,81 @@
+[maxscale]
+threads=auto
+log_debug=1
+localhost_match_wildcard_host=true
+maxlog=1
+
+[RW-Split-Router]
+type=service
+router=readwritesplit
+servers=lillamy,mumin
+user=maxscale
+passwd=maxDB;
+filters= top5 | Statement-Counter
+
+[RW-Split-Listener]
+type=listener
+service=RW-Split-Router
+protocol=mariadbclient
+#address=192.168.100.13
+port=4406
+
+[MySQL-Monitor]
+type=monitor
+module=mariadbmon
+servers=lillamy,mumin
+user=maxscale
+passwd=maxDB;
+monitor_interval=5000
+
+[Statement-Counter]
+type=filter
+module=counterfilter
+ # time window in seconds. Default 60.
+time-window=10
+# Count these events (will be upper-cased). "*" - count everything.
+# default *
+events=select,insert,update,delete
+# text or json. Appends extension (txt,json), unless already there.
+# default json
+file-type=json
+# create or append. Default create.
+file-mode=create
+# file path, directory must exist.
+report-file=/tmp/counter-report
+# file path, directory must exist.
+totals-file=/tmp/counter-totals
+
+[mumin]
+type=server
+address=192.168.100.13
+port=3306
+protocol=MariaDBBackend
+localhost_match_wildcard_host=true
+router_options=master
+#socket=/var/run/mysqld/mysqld.sock
+
+[lillamy]
+type=server
+address=192.168.100.24
+port=3306
+protocol=MariaDBBackend
+localhost_match_wildcard_host=true
+router_options=slave
+#socket=/var/run/mysqld/mysqld.sock
+
+[Debug-Service]
+type=service
+router=debugcli
+
+[Debug-Listener]
+type=listener
+service=Debug-Service
+protocol=telnetd
+port=4407
+
+[top5]
+type=filter
+module=topfilter
+count=5
+filebase=/var/log/DBSessions/top30
+
